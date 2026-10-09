@@ -109,9 +109,20 @@ jobs:
         with:
           name: signing-test-only-NOT-INSTALLABLE
           path: build
+      - name: Diagnose signing certificate
+        if: always()
+        run: |
+          echo "Commit: $GITHUB_SHA"
+          unzip -q -o build/test-signed.ipa -d build/signed
+          codesign -dvvv --extract-certificates=/tmp/cert build/signed/Payload/FileBridge.app 2>&1 | head -40 || true
+          for c in /tmp/cert*; do
+            echo "=== $c"
+            openssl x509 -inform der -in "$c" -noout -text \
+              | grep -A1 -E "Subject:|Issuer:|Basic Constraints|Key Usage" || true
+          done
       - name: Verify signature produced on Windows
         run: |
-          unzip -q build/test-signed.ipa -d build/signed
+          unzip -q -o build/test-signed.ipa -d build/signed
           codesign --verify --deep --strict --verbose=2 build/signed/Payload/FileBridge.app
           echo 'iPad build, Windows build, transfer tests, signer smoke test, and code-signature verification passed.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Real iPad installation still requires your Apple-issued certificate, matching profile, and a trusted USB connection.' >> "$GITHUB_STEP_SUMMARY"
