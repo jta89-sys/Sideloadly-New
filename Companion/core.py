@@ -143,19 +143,18 @@ def sign_ipa(source: Path, destination: Path, p12: Path, password: str,
     metadata = inspect_ipa(source)
     bundle = bundle_override.strip() or metadata["bundle"]
     profile = read_profile(profile_path)
-    key, certificate, _ = validate_identity(p12, password, profile, bundle, udid)
+    key, certificate, chain = validate_identity(p12, password, profile, bundle, udid)
     if not zsign.is_file():
         raise ValueError("The bundled zsign tool is missing. Extract the entire Windows ZIP again.")
     with tempfile.TemporaryDirectory(dir=scratch, prefix="sign-") as tmp:
         folder = Path(tmp)
         # No password is exposed in process arguments. The private key lives only in
         # this per-user protected temporary directory and is removed after signing.
-        key_path, cert_path = folder / "key.pem", folder / "cert.pem"
-        key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
-                             serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
-        cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        key_path = folder / "identity.p12"
+        key_path.write_bytes(pkcs12.serialize_key_and_certificates(
+            b"SideBridge", key, certificate, chain, serialization.NoEncryption()))
         signed = folder / "signed.ipa"
-        result = subprocess.run([str(zsign), "-k", str(key_path), "-c", str(cert_path),
+        result = subprocess.run([str(zsign), "-k", str(key_path),
                                  "-m", str(profile_path.resolve()), "-b", bundle, "-f", "-z", "6",
                                  "-t", str(folder), "-o", str(signed), str(source.resolve())],
                                 capture_output=True, text=True, errors="replace", timeout=600,

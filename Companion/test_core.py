@@ -37,10 +37,17 @@ def fixture_ipa(path, extras=None, encrypted=False):
 def identity(directory, bundle="com.example.*"):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = dt.datetime.now(dt.timezone.utc)
+    root_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "SideBridge TEST ROOT — NOT APPLE")])
+    root_cert = (x509.CertificateBuilder().subject_name(root_name).issuer_name(root_name).public_key(root_key.public_key())
+                 .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(days=1))
+                 .not_valid_after(now + dt.timedelta(days=3))
+                 .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+                 .sign(root_key, hashes.SHA256()))
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "SideBridge TEST ONLY")])
-    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(root_name).public_key(key.public_key())
             .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(days=1))
-            .not_valid_after(now + dt.timedelta(days=2)).sign(key, hashes.SHA256()))
+            .not_valid_after(now + dt.timedelta(days=2)).sign(root_key, hashes.SHA256()))
     profile = {"Name": "SideBridge TEST ONLY — cannot install on a real iPad", "UUID": "11111111-2222-3333-4444-555555555555",
                "TeamIdentifier": ["TESTTEAM01"], "ApplicationIdentifierPrefix": ["TESTTEAM01"],
                "CreationDate": now.replace(tzinfo=None), "ExpirationDate": (now + dt.timedelta(days=1)).replace(tzinfo=None),
@@ -50,7 +57,7 @@ def identity(directory, bundle="com.example.*"):
                                 "com.apple.developer.team-identifier": "TESTTEAM01", "get-task-allow": True,
                                 "keychain-access-groups": ["TESTTEAM01.*"]}}
     p12 = directory / "test.p12"
-    p12.write_bytes(pkcs12.serialize_key_and_certificates(b"test", key, cert, None,
+    p12.write_bytes(pkcs12.serialize_key_and_certificates(b"test", key, cert, [root_cert],
                     serialization.BestAvailableEncryption(b"test-password")))
     provision = directory / "test.mobileprovision"
     provision.write_bytes(pkcs7.PKCS7SignatureBuilder().set_data(plistlib.dumps(profile))
