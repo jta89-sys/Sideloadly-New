@@ -97,7 +97,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: signing-test-only-NOT-INSTALLABLE
-          path: build/test-signed.ipa
+          path: |
+            build/test-signed.ipa
+            build/test-signed.cert-sha1
           if-no-files-found: error
           retention-days: 1
   verify-signature:
@@ -123,6 +125,18 @@ jobs:
       - name: Verify signature produced on Windows
         run: |
           unzip -q -o build/test-signed.ipa -d build/signed
-          codesign --verify --deep --strict --verbose=2 build/signed/Payload/FileBridge.app
+          fingerprint=$(cat build/test-signed.cert-sha1)
+          [[ "$fingerprint" =~ ^[0-9a-f]{40}$ ]]
+          # The generated identity cannot satisfy zsign's Apple designated requirement.
+          # Verify signature integrity against the exact public test identity instead.
+          requirement="=identifier \"com.jta89.sidebridge\" and certificate leaf = H\"$fingerprint\""
+          codesign --verify --deep --strict --verbose=2 -R "$requirement" build/signed/Payload/FileBridge.app
+          cp -R build/signed/Payload/FileBridge.app build/tampered.app
+          printf '\\nTAMPERED\\n' >> build/tampered.app/FileBridge
+          if codesign --verify --deep --strict -R "$requirement" build/tampered.app; then
+            echo 'ERROR: verification accepted a modified executable'
+            exit 1
+          fi
           echo 'iPad build, Windows build, transfer tests, signer smoke test, and code-signature verification passed.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Real iPad installation still requires your Apple-issued certificate, matching profile, and a trusted USB connection.' >> "$GITHUB_STEP_SUMMARY"
+
