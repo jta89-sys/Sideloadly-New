@@ -187,7 +187,8 @@ class APITests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()import datetime as dt
+    unittest.main()
+import datetime as dt
 import hashlib
 import http.client
 import json
