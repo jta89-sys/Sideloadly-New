@@ -227,8 +227,8 @@ class Window:
             pairing = f"sidebridge://{address}:{port}?fp={fingerprint}&token={self.server.token}"
             self.pairing.set(pairing)
             import qrcode
-            from PIL import ImageTk
-            image = qrcode.make(pairing).resize((290, 290))
+            from PIL import Image, ImageTk
+            image = qrcode.make(pairing).resize((290, 290), Image.Resampling.NEAREST)
             self.qr = ImageTk.PhotoImage(image)
             self.qr_label.configure(image=self.qr)
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -306,6 +306,10 @@ def main():
     try:
         app = Window(root, smoke=smoke)
         if smoke:
+            from pymobiledevice3.lockdown import create_using_usbmux
+            from pymobiledevice3.services.installation_proxy import InstallationProxyService
+            assert callable(create_using_usbmux) and hasattr(InstallationProxyService, "install_from_local")
+            assert resource_path("vendor/zsign.exe").is_file()
             root.update()
             app.close()
             return

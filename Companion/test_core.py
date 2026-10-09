@@ -75,6 +75,11 @@ class ValidationTests(unittest.TestCase):
         fixture_ipa(self.ipa, {"../../outside.txt": "bad"})
         with self.assertRaises(ValueError): inspect_ipa(self.ipa)
 
+    def test_windows_path_aliases(self):
+        for name in ("Payload/Test.app/.. /outside", "Payload/Test.app/CON.txt", "Payload/Test.app/./file"):
+            fixture_ipa(self.ipa, {name: "bad"})
+            with self.assertRaises(ValueError): inspect_ipa(self.ipa)
+
     def test_extensions_rejected_without_modifying_source(self):
         fixture_ipa(self.ipa, {"Payload/Test.app/PlugIns/Widget.appex/Info.plist": b"test"})
         before = self.ipa.read_bytes()

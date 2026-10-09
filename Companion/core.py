@@ -48,12 +48,16 @@ def inspect_ipa(path: Path) -> dict:
         names = set()
         for entry in entries:
             name = entry.filename
-            parts = PurePosixPath(name).parts
+            parts = name.rstrip("/").split("/")
+            normalized = name.rstrip("/").casefold()
             if (not parts or name.startswith("/") or "\\" in name or ":" in name
-                    or any(p in ("..", ".") for p in parts) or name in names
+                    or any(not p or p in ("..", ".") or p.endswith((".", " ")) for p in parts)
+                    or normalized in names or "\x00" in name
+                    or any(re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", p) for p in parts)
                     or stat.S_ISLNK(entry.external_attr >> 16) or entry.flag_bits & 1):
                 raise ValueError("IPA contains an unsafe or unsupported ZIP entry.")
-            names.add(name)
+            names.add(normalized)
+        names = {entry.filename for entry in entries}
         roots = [n for n in names if re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", n)]
         if len(roots) != 1:
             raise ValueError("IPA must contain one app under Payload.")
