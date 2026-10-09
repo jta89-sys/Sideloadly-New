@@ -1,0 +1,5 @@
+cryptography==50.0.2
+asn1crypto==1.5.1
+qrcode[pil]==8.2
+pymobiledevice3==11.26.0
+pyinstaller==6.20.0

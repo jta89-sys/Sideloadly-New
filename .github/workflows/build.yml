@@ -1,0 +1,117 @@
+name: Build SideBridge for iPad and Windows
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sidebridge-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ipad:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test file copying
+        run: |
+          mkdir -p build
+          swiftc App/FileOperations.swift Tests/FileOperationsTests.swift -o build/file-tests
+          build/file-tests
+      - name: Build iPad app
+        run: |
+          set -o pipefail
+          xcodebuild -project FileBridge.xcodeproj -scheme FileBridge \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            PRODUCT_BUNDLE_IDENTIFIER=com.jta89.sidebridge \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tee build/xcodebuild.log
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/package/Payload
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/FileBridge.app build/package/Payload/
+          cd build/package
+          zip -qr ../SideBridge-unsigned.ipa Payload
+          cd ../..
+          python3 scripts/verify_ipa.py build/SideBridge-unsigned.ipa
+          shasum -a 256 build/SideBridge-unsigned.ipa > build/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SideBridge-iPad-unsigned
+          path: |
+            build/SideBridge-unsigned.ipa
+            build/SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iPad-build-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+  windows:
+    needs: ipad
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: Companion/requirements.txt
+      - name: Install build dependencies
+        run: python -m pip install -r Companion/requirements.txt
+      - name: Test validation, authentication and encrypted transfers
+        run: python -m unittest discover -s Companion -p test_core.py -v
+      - name: Prepare verified signing tool
+        run: python scripts/prepare_windows.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: SideBridge-iPad-unsigned
+          path: build/ipa
+      - name: Test signing a compiled IPA with a generated test identity
+        run: python Companion/signing_smoke.py build/ipa/SideBridge-unsigned.ipa Companion/vendor/zsign.exe build/test-signed.ipa
+      - name: Package Windows executable
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name SideBridge --paths Companion --collect-all pymobiledevice3 --collect-all qrcode --collect-all asn1crypto --add-data "Companion/vendor;vendor" --add-data "Companion/licenses;licenses" --add-data "Companion/zsign-LICENSE.txt;." Companion/app.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item README.md dist/SideBridge/START-HERE.md
+          Copy-Item LICENSE dist/SideBridge/LICENSE
+      - name: Smoke-test packaged Windows app
+        run: |
+          $process = Start-Process -FilePath dist/SideBridge/SideBridge.exe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'GUI smoke test timed out' }
+          if ($process.ExitCode -ne 0) { throw "GUI smoke test failed: $($process.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SideBridge-Windows-x64
+          path: dist/SideBridge/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signing-test-only-NOT-INSTALLABLE
+          path: build/test-signed.ipa
+          if-no-files-found: error
+          retention-days: 1
+  verify-signature:
+    needs: windows
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: signing-test-only-NOT-INSTALLABLE
+          path: build
+      - name: Verify signature produced on Windows
+        run: |
+          unzip -q build/test-signed.ipa -d build/signed
+          codesign --verify --deep --strict --verbose=2 build/signed/Payload/FileBridge.app
+          echo 'iPad build, Windows build, transfer tests, signer smoke test, and code-signature verification passed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Real iPad installation still requires your Apple-issued certificate, matching profile, and a trusted USB connection.' >> "$GITHUB_STEP_SUMMARY"
