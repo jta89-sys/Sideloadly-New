@@ -130,10 +130,20 @@ jobs:
           # The generated identity cannot satisfy zsign's Apple designated requirement.
           # Verify signature integrity against the exact public test identity instead.
           requirement="=identifier \"com.jta89.sidebridge\" and certificate leaf = H\"$fingerprint\""
-          codesign --verify --deep --strict --verbose=2 -R "$requirement" build/signed/Payload/FileBridge.app
+          verify_test_signature() {
+            local report status=0
+            report=$(codesign --verify --deep --strict --verbose=2 -R "$requirement" "$1" 2>&1) || status=$?
+            printf '%s\n' "$report"
+            # codesign also checks the embedded Apple requirement even with -R.
+            # Accept ONLY the three exact diagnostics for intact code, the expected
+            # designated-requirement failure, and a matching pinned test certificate.
+            [[ "$status" == 3 ]] &&
+              [[ "$report" == "${1}: valid on disk"$'\n'"${1}: does not satisfy its designated Requirement"$'\n'"${1}: explicit requirement satisfied" ]]
+          }
+          verify_test_signature build/signed/Payload/FileBridge.app
           cp -R build/signed/Payload/FileBridge.app build/tampered.app
           printf '\\nTAMPERED\\n' >> build/tampered.app/FileBridge
-          if codesign --verify --deep --strict -R "$requirement" build/tampered.app; then
+          if verify_test_signature build/tampered.app; then
             echo 'ERROR: verification accepted a modified executable'
             exit 1
           fi
